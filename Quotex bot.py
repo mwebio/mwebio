@@ -3,13 +3,12 @@ import requests
 import json
 import re
 import logging
-from ratelimit import limits, sleep_and_retry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Telegram Bot Token
-TELEGRAM_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN'
+TELEGRAM_TOKEN = '6406472622:AAEh27NIJMTWP-a5aTxgFSGeIXbNDJnuvLs'
 
 # Quotext API endpoint
 QUOTEXT_API_URL = 'https://api.quotext.com'
@@ -17,25 +16,51 @@ QUOTEXT_API_URL = 'https://api.quotext.com'
 # Initialize Telegram Bot
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-# Rate limit settings (10 requests per minute)
-RATE_LIMIT = 10
-RATE_LIMIT_PERIOD = 60
+def extract_trade_signals_from_text(message):
+    # Implement logic to extract trade signals from text message
+    pattern = r'(\d{2}:\d{2}) - (\w+-\w+) - (PUT|CALL|UP|DOWN)\s*✅?'
+    match = re.findall(pattern, message)
+    
+    signals = []
+    if match:
+        for m in match:
+            time = m[0]
+            currency = m[1]
+            option = m[2]
+            entry_price = 0  # Default entry price
+            
+            # Logic for determining entry price based on opening and closing prices
+            if option == 'PUT' or option == 'DOWN':
+                entry_price = 1  # If opening price < closing price, use $1 as entry price
+            elif option == 'CALL' or option == 'UP':
+                entry_price = 1  # If opening price > closing price, double the previous entry price
+            
+            # Append trade signal to the list
+            signals.append({'time': time, 'currency': currency, 'option': option, 'entry_price': entry_price})
+    
+    return signals
 
-@sleep_and_retry
-@limits(calls=RATE_LIMIT, period=RATE_LIMIT_PERIOD)
+def extract_trade_signals_from_image(image):
+    # Implement logic to extract trade signals from image
+    # You may use OCR (Optical Character Recognition) libraries to extract text from the image
+    pass
+
+def extract_trade_signals(message):
+    # Check if the message contains text or image
+    if message.text:
+        return extract_trade_signals_from_text(message.text)
+    elif message.photo:
+        return extract_trade_signals_from_image(message.photo[-1])  # Use the last photo (highest resolution)
+    else:
+        return []
+
 def execute_trade(signal, email, password, use_demo=False):
     try:
-        # Determine trade action based on profit or loss
-        if signal['entry_price'] > 1:
-            action = 'buy' if signal['option'] in ['CALL', 'UP'] else 'sell'  # If profit, execute buy/sell
-        else:
-            action = 'sell' if signal['option'] in ['CALL', 'UP'] else 'buy'  # If loss, execute sell/buy
-
         # Use Quotext API to execute the trade based on the signal
         # Send a POST request to the Quotext API with the trade details and authentication
         trade_data = {
             'symbol': signal['currency'],
-            'action': action,
+            'action': 'buy' if signal['option'] in ['CALL', 'UP'] else 'sell',  # Mapping option to action
             'price': signal['entry_price'],
             # Add any other necessary parameters for the trade
             'email': email if not use_demo else 'mwebilevis40@gmail.com',  # Use demo account email if specified
@@ -49,20 +74,9 @@ def execute_trade(signal, email, password, use_demo=False):
         
         # Log trade execution
         logging.info('Trade executed successfully: %s', response.json())
-    except requests.exceptions.HTTPError as e:
-        logging.error('HTTP error occurred: %s', e)
-    except requests.exceptions.ConnectionError as e:
-        logging.error('Error connecting to Quotext API: %s', e)
-    except requests.exceptions.Timeout as e:
-        logging.error('Timeout occurred while connecting to Quotext API: %s', e)
-    except requests.exceptions.RequestException as e:
-        logging.error('An error occurred while sending the request to Quotext API: %s', e)
     except Exception as e:
-        # Log any other unhandled exceptions
-        logging.error('An unexpected error occurred during trade execution: %s', e)
-    else:
-        # Successful trade execution, no need to count towards rate limit
-        pass
+        # Log error if trade execution fails
+        logging.error('Error executing trade: %s', e)
 
 def main():
     try:
